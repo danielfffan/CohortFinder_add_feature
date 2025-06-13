@@ -9,6 +9,8 @@ from collections import Counter
 import cv2
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from matplotlib.gridspec import GridSpec
 import numpy as np
 import pandas as pd
 import umap.umap_ as umap
@@ -139,6 +141,114 @@ def draw_plot(embedding,pred,cmap,linewidths,plots_outdir,suffix,testind=None):
         plt.savefig(os.path.join(plots_outdir, f'{suffix}.png'))
     return
 
+def priority_index_plot(embedding, plots_outdir, suffix, base,
+                        x_col='embed_x', y_col='embed_y', priority_col='priority',
+                        image_col='#dataset:filename', size_scale=3, cmap='plasma_r',
+                        show_labels=True, show_arrows=True):
+    """
+    Plot a 2D embedding where point size reflects priority (earlier = larger),
+    and show top 5 priority images as thumbnails in a right-hand column.
+
+    Parameters:
+    - embedding: pd.DataFrame with x, y, priority, and image path columns
+    - plots_outdir: output directory to save the plot
+    - suffix: output file name suffix
+    - base: base directory where thumbnail image folders are stored
+    - x_col, y_col, priority_col, image_col: column names
+    - size_scale: scaling factor for marker size
+    - cmap: colormap for point coloring (use *_r for reversed)
+    - show_labels: display priority values as text
+    - show_arrows: draw arrows connecting top 5 early-priority points
+    """
+    embedding = embedding.copy()
+    priority_array = embedding[priority_col].to_numpy()
+
+    # Non-linear scaling to exaggerate early priorities
+    size = (priority_array.max() - priority_array + 1) ** 2 * size_scale
+    embedding['size'] = size
+
+    # Create subplots: 1 row, 2 columns
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(20, 12), gridspec_kw={'width_ratios': [3, 1]})
+
+    # --- Left: Embedding plot ---
+    scatter = ax0.scatter(
+        embedding[x_col], embedding[y_col],
+        s=embedding['size'],
+        c=embedding[priority_col],
+        cmap=cmap,
+        alpha=0.8,
+        marker='o',
+        vmin=embedding[priority_col].min(),
+        vmax=embedding[priority_col].max() + 10  # expand color scale
+    )
+    ax0.set_facecolor("#f0f0f0")
+
+    if show_arrows:
+        top5 = embedding.nsmallest(5, priority_col).sort_values(by=priority_col)
+        for i in range(4):
+            x_start, y_start = top5.iloc[i][[x_col, y_col]]
+            x_end, y_end = top5.iloc[i + 1][[x_col, y_col]]
+            ax0.annotate("",
+                         xy=(x_end, y_end), xytext=(x_start, y_start),
+                         arrowprops=dict(arrowstyle="->", color='green', lw=2))
+    
+    if show_labels:
+        for _, row in embedding.iterrows():
+            # Get marker area (s), then calculate diameter in points
+            marker_area = row['size']
+            diameter_points = 2 * np.sqrt(marker_area / np.pi)
+
+            # Convert points to data coordinates (approximate)
+            # Get y-axis height in points and data units
+            y_range = ax0.get_ylim()
+            y_data_height = y_range[1] - y_range[0]
+            y_points_to_data = y_data_height / ax0.bbox.height
+
+            # Compute vertical shift in data units
+            y_shift = diameter_points * y_points_to_data
+
+            ax0.text(
+                row[x_col],
+                row[y_col] - y_shift * 0.6,  # adjust the multiplier for fine tuning
+                str(row[priority_col]),
+                fontsize=10, ha='center', va='top',
+                fontweight='bold', color='blue'
+            )
+    ax0.set_title('Embedding Plot with Size Reflecting Priority Index')
+    ax0.set_xlabel(x_col)
+    ax0.set_ylabel(y_col)
+    ax0.grid(True)
+    fig.colorbar(scatter, ax=ax0, label='Priority Index (Earlier → Later)')
+
+    # --- Right: Stack 5 thumbnails vertically ---
+    top5_images = embedding.nsmallest(5, priority_col)
+    ax1.axis('off')  # turn off the main right-axis
+    spacing = 1.0 / 5
+
+    for idx, (_, row) in enumerate(top5_images.iterrows()):
+        fname = row[image_col]
+        thumb_glob = f"{base}/{fname}/{fname}*thumb*small*"
+        match_files = glob.glob(thumb_glob)
+
+        if len(match_files) == 0:
+            logging.error(f"No thumbnail found for {fname} in {base}")
+            img_display = np.ones((100, 100, 3))  # white placeholder
+        else:
+            img_display = mpimg.imread(match_files[0])
+
+        # Positioning thumbnail within ax1 using inset axes
+        subax = ax1.inset_axes([0.05, 1 - (idx + 1) * spacing + 0.02, 0.9, spacing - 0.05])
+        subax.imshow(img_display)
+        subax.set_title(f"Priority {row[priority_col]}", fontsize=10)
+        subax.axis('off')
+
+    # Save figure
+    os.makedirs(plots_outdir, exist_ok=True)
+    save_path = os.path.join(plots_outdir, f"{suffix}.png")
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    print(f"Plot saved to: {save_path}")
+
 def batch_effect_score_calculation(output):
     sil_score = silhouette_score(output[['embed_x', 'embed_y']], output['groupid'])
     db_score = davies_bouldin_score(output[['embed_x', 'embed_y']], output['groupid'])
@@ -179,19 +289,11 @@ def select_points_optimized(points):
     
     # Repeat until no points are left
     while remaining_indices:
-        # Calculate the average distance from the selected points to each remaining point
-        avg_distances = []
-        
-        # Calculate average distances for all remaining points
-        for index in remaining_indices:
-            distances = distance_matrix[index, selected_indices]  # Efficiently get distances using pre-computed matrix
-            avg_distance = np.mean(distances)
-            avg_distances.append(avg_distance)
-        
-        # Select the point with the maximum average distance
-        next_index = max(remaining_indices, key=lambda idx: avg_distances[list(remaining_indices).index(idx)])
-        
-        # Update the selected points
+        remaining_list = list(remaining_indices)
+        avg_distances = [np.mean(distance_matrix[idx, selected_indices]) for idx in remaining_list]
+
+        next_index = remaining_list[np.argmax(avg_distances)]
+
         selected_indices.append(next_index)
         remaining_indices.remove(next_index)
 
@@ -464,6 +566,22 @@ def runCohortFinder(args):
 
         # ------------------------- MAKE GROUP PLOTS ------------------------- #
         basedir = os.path.dirname(args.resultsfilepath)
+
+        # Visualization of priority index
+        priority_index_plot(
+                output,                # your DataFrame with embed_x, embed_y, priority, and filename
+                plots_outdir,              # where you want to save the plot
+                suffix='priority',             # output filename suffix
+                base=basedir,        # base folder for image lookup
+                x_col='embed_x',
+                y_col='embed_y',
+                priority_col='priority',
+                image_col='#dataset:filename',
+                size_scale=15,
+                cmap='Reds_r',
+                show_labels=True,
+                show_arrows=True
+            )
         # Visualize cluster results with thumbnails in the contact sheet.
         # Set the number of thumbnails in each row to 5 by default.
         # 'ngroupsof5' represents the number of rows for the visualization results.
