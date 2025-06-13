@@ -233,17 +233,21 @@ We also introduce three clustering metrics: the silhouette coefficient, the Davi
 
 #### 6. Priority index
 
-This function visualizes a 2D embedding of images where the priority index is used to guide the annotation workflow. Specifically, it helps pathologists or researchers determine which images to prioritize for annotation based on a precomputed ranking.
+CohortFinder provides a visualization tool for the **priority index**, which guides the annotation workflow by ranking images based on their importance or informativeness.
 
-Point Size: Reflects annotation priority — earlier-priority images appear larger.
+- **Left Plot**: Displays a 2D embedding of all images.
+  - **Point Size**: Indicates annotation priority — larger points represent higher-priority images that should be annotated earlier.
+  - **Color**: Encodes the relative ranking of the priority index, providing a visual gradient of priority.
+  - **Labels and Arrows**: Optionally highlight the top 5 highest-priority images, showing their order and making the suggested annotation path clear at a glance.
 
-Color: Encodes the relative ranking of the priority index.
+- **Right Panel**: Shows thumbnails of the top 5 prioritized images to offer visual context, aiding decision-making.
 
-Labels and Arrows: Optional labels and connecting arrows highlight the top 5 highest-priority images, providing a quick glance at the suggested annotation order.
+This visualization supports:
+- **Quality Control**  
+- **Annotation Planning**  
+- **Human-in-the-loop Workflows**
 
-Right Panel: Displays thumbnails of the top 5 images, offering visual context to aid decision-making.
-
-This plot can be used in quality control, annotation planning, or semi-automated workflows where human-in-the-loop validation is necessary. It allows pathologists to quickly identify which slides or images to start with, thereby optimizing their annotation efficiency and ensuring that the most informative samples are reviewed first.
+It helps pathologists or researchers quickly identify which images or slides to annotate first, improving annotation efficiency and ensuring the most informative samples are reviewed early in the process.
 
 <img src="./cohortfinder/figs/priority.png" alt="embed_split" style="zoom:25%;" />
 
